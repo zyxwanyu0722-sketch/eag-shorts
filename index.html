@@ -1,0 +1,279 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>EAG Shorts｜战队精彩集锦</title>
+    <style>
+        *{
+            margin:0;
+            padding:0;
+            box-sizing:border-box;
+            font-family:"Microsoft Yahei",sans-serif;
+        }
+        body{
+            background:#000;
+            overflow:hidden;
+            color:#fff;
+        }
+        .shorts-container{
+            width:100vw;
+            height:100vh;
+            position:relative;
+        }
+        .slide{
+            width:100%;
+            height:100%;
+            position:absolute;
+            top:0;
+            left:0;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            transition: transform 0.45s ease;
+        }
+        .slide video{
+            width:100%;
+            height:100%;
+            object-fit:cover;
+        }
+        /* 右侧操作栏 */
+        .right-bar{
+            position:absolute;
+            right:16px;
+            bottom:120px;
+            display:flex;
+            flex-direction:column;
+            gap:24px;
+            z-index:10;
+        }
+        .action-btn{
+            width:52px;
+            height:52px;
+            border-radius:50%;
+            background:rgba(20,20,20,0.7);
+            border:1px solid #ff2222;
+            color:#ff2222;
+            display:flex;
+            align-items:center;
+            justify-content:center;
+            font-size:22px;
+            cursor:pointer;
+            transition:0.25s;
+        }
+        .action-btn:active{
+            transform:scale(1.15);
+            background:#ff2222;
+            color:#fff;
+        }
+        /* 底部文字信息 */
+        .info-box{
+            position:absolute;
+            left:20px;
+            bottom:90px;
+            z-index:10;
+            max-width:75%;
+        }
+        .info-box h3{
+            color:#ff4444;
+            font-size:1.3rem;
+            margin-bottom:8px;
+            text-shadow:0 0 8px #ff2222;
+        }
+        .info-box p{
+            color:#ddd;
+            line-height:1.6;
+            font-size:0.95rem;
+        }
+        /* 进度条 */
+        .progress-wrap{
+            position:absolute;
+            bottom:12px;
+            left:0;
+            width:100%;
+            height:4px;
+            background:rgba(255,255,255,0.2);
+            z-index:11;
+        }
+        .progress-bar{
+            height:100%;
+            width:0%;
+            background:#ff2222;
+            box-shadow:0 0 6px #ff2222;
+        }
+        /* 顶部标题 */
+        .top-title{
+            position:absolute;
+            top:20px;
+            width:100%;
+            text-align:center;
+            z-index:10;
+            font-size:1.6rem;
+            letter-spacing:4px;
+            color:#ff2222;
+            text-shadow:0 0 10px #ff2222;
+        }
+        /* 返回主页按钮 */
+        .back-home{
+            position:absolute;
+            top:20px;
+            left:20px;
+            z-index:11;
+            padding:8px 16px;
+            background:#111;
+            border:1px solid #ff2222;
+            color:#ff4444;
+            border-radius:8px;
+            cursor:pointer;
+            text-decoration:none;
+        }
+        /* 双击飘心动画 */
+        .float-heart{
+            position:absolute;
+            color:#ff2222;
+            font-size:46px;
+            pointer-events:none;
+            animation:floatUp 0.8s ease forwards;
+            z-index:20;
+        }
+        @keyframes floatUp{
+            0%{opacity:1;transform:scale(0.6) translateY(0)}
+            100%{opacity:0;transform:scale(1.4) translateY(-70px)}
+        }
+    </style>
+</head>
+<body>
+    <div class="shorts-container" id="shortsWrap">
+        <div class="top-title">EAG SHORTS</div>
+        <a href="./index.html" class="back-home">返回主页</a>
+        <!-- 视频容器 JS动态生成 -->
+    </div>
+
+    <script>
+        // ========== 视频配置！新增视频只在这里追加 ==========
+        const videos = [
+            {
+                src:"video1.mp4",
+                title:"EAG wanyu 精彩残局",
+                desc:"训练赛高光｜自由人残局处理"
+            },
+            {
+                src:"video2.mp4",
+                title:"战队协同转移",
+                desc:"训练赛复盘｜圈边协同拉扯"
+            },
+            // 👉 以后新增视频，复制这一段，修改src、title、desc即可
+            // {
+            //     src:"video3.mp4",
+            //     title:"新高光标题",
+            //     desc:"描述文字"
+            // }
+        ]
+
+        const wrap = document.getElementById('shortsWrap');
+        let current = 0;
+        const total = videos.length;
+        let lock = false;
+        let slides = [];
+
+        // 动态创建每一条slide
+        videos.forEach((item, idx)=>{
+            const slide = document.createElement('div');
+            slide.className = "slide";
+            slide.dataset.index = idx;
+            slide.innerHTML = `
+                <video src="${item.src}" loop muted playsinline></video>
+                <div class="right-bar">
+                    <div class="action-btn like">❤</div>
+                    <div class="action-btn comment">💬</div>
+                    <div class="action-btn save">⭐</div>
+                </div>
+                <div class="info-box">
+                    <h3>${item.title}</h3>
+                    <p>${item.desc}</p>
+                </div>
+                <div class="progress-wrap">
+                    <div class="progress-bar"></div>
+                </div>
+            `
+            wrap.appendChild(slide);
+            slides.push(slide);
+        })
+
+        function updateSlide(){
+            slides.forEach((s,idx)=>{
+                const offset = idx - current;
+                s.style.transform = `translateY(${offset * 100}%)`;
+                const v = s.querySelector('video');
+                const bar = s.querySelector('.progress-bar');
+                if(idx === current){
+                    v.play().catch(()=>{});
+                    // 绑定进度条更新
+                    v.ontimeupdate = ()=>{
+                        if(v.duration){
+                            const percent = (v.currentTime / v.duration)*100;
+                            bar.style.width = percent + "%";
+                        }
+                    }
+                }else{
+                    v.pause();
+                }
+            })
+        }
+        updateSlide();
+
+        // 鼠标滚轮切换
+        window.addEventListener('wheel', (e)=>{
+            if(lock) return;
+            lock = true;
+            if(e.deltaY > 0 && current < total -1){
+                current++;
+            }else if(e.deltaY < 0 && current > 0){
+                current--;
+            }
+            updateSlide();
+            setTimeout(()=>{lock=false},500);
+        })
+
+        // 手机触摸滑动
+        let touchStartY = 0;
+        window.addEventListener('touchstart', e=>{
+            touchStartY = e.touches[0].clientY;
+        })
+        window.addEventListener('touchend', e=>{
+            if(lock) return;
+            lock = true;
+            const touchEndY = e.changedTouches[0].clientY;
+            const diff = touchStartY - touchEndY;
+            if(diff > 60 && current < total -1){
+                current++;
+            }else if(diff < -60 && current >0){
+                current--;
+            }
+            updateSlide();
+            setTimeout(()=>{lock=false},500);
+        })
+
+        // 右侧点赞按钮
+        document.querySelectorAll('.like').forEach(btn=>{
+            btn.onclick = ()=>{
+                btn.style.background="#ff2222";
+                btn.style.color="#fff";
+            }
+        })
+
+        // ✨ 双击屏幕 飘红心点赞
+        slides.forEach(slide=>{
+            slide.addEventListener('dblclick', (e)=>{
+                const heart = document.createElement('div');
+                heart.className = "float-heart";
+                heart.textContent = "❤";
+                heart.style.left = e.clientX + "px";
+                heart.style.top = e.clientY + "px";
+                document.body.appendChild(heart);
+                setTimeout(()=>heart.remove(),850);
+            })
+        })
+    </script>
+</body>
+</html>
