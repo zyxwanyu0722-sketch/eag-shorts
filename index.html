@@ -1,251 +1,80 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-<meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>English Reading · Bug Page</title>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Scholarpedia</title>
 <style>
-  * {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-  }
-  body {
-    background: #000;
-    overflow: hidden;
-    height: 100vh;
-    font-family: system-ui, sans-serif;
-  }
-  .top-nav{
-    position:fixed;
-    z-index:12;
-    top:16px;
-    left:50%;
-    transform: translateX(-50%);
-    display:flex;
-    gap:8px;
-    flex-wrap:wrap;
-    justify-content:center;
-  }
-  .top-nav button{
-    padding:7px 14px;
-    border:1px solid #00ff88;
-    background:rgba(0,0,0,0.65);
-    color:#00ff88;
-    border-radius:8px;
-    font-size:14px;
-  }
-  .top-nav button.active{
-    background:#00ff88;
-    color:#000;
-  }
-  .reading-box{
-    position:fixed;
-    z-index:10;
-    top:75px;
-    left:50%;
-    transform:translateX(-50%);
-    width:92%;
-    max-width:740px;
-    max-height:calc(100vh - 120px);
-    overflow-y:auto;
-    padding:24px;
-    background:rgba(0,0,0,0.76);
-    border:1px solid #00ff88;
-    border-radius:12px;
-    color:#eeeeee;
-    line-height:1.75;
-    font-size:16px;
-  }
-  .reading-box h2{
-    color:#00ff88;
-    margin-bottom:16px;
-    font-size:22px;
-  }
-  .reading-box p{
-    margin-bottom:14px;
-  }
-  .tip-text {
-    position: fixed;
-    bottom:16px;
-    left: 0;
-    right: 0;
-    text-align: center;
-    color: #00ff88;
-    font-size:13px;
-    z-index: 10;
-    pointer-events: none;
-  }
-  canvas {
-    display: block;
-    position: fixed;
-    top: 0;
-    left: 0;
-    z-index: 1;
-  }
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  overflow:hidden;
+  background:#000;
+  height:100vh;
+  display:flex;
+  align-items:center;
+  justify-content:center;
+}
+canvas{position:fixed;top:0;left:0;z-index:1}
+.btn{
+  position:relative;
+  z-index:2;
+  font-size:42px;
+  color:#0cf;
+  border:2px solid #0cf;
+  padding:24px 60px;
+  border-radius:16px;
+  background:transparent;
+  text-decoration:none;
+}
 </style>
 </head>
 <body>
-<div class="top-nav">
-  <button onclick="switchArticle(0)" class="active">Supersymmetry</button>
-  <button onclick="switchArticle(1)">Gravitational Waves</button>
-  <button onclick="switchArticle(2)">Top Quark</button>
-  <button onclick="switchArticle(3)">Real-time Particle Data</button>
-</div>
-<div class="reading-box" id="articleContainer"></div>
-<div class="tip-text">Tap anywhere on screen, the bug will crawl there</div>
-<canvas id="bugCanvas"></canvas>
-
+<canvas id="c"></canvas>
+<a class="btn" href="./graph.html">Scholarpedia</a>
 <script>
-const articleList = [
-`
-<h2>Supersymmetry and the LHC Run 2</h2>
-<p>The idea of exploiting potential symmetries of a physical system to impose constraints on the system's Lagrangian, and therefore on the equations of motion, has been a very fertile one. It has been used successfully in almost all branches of physics, from classical mechanics to contemporary applications to physical modelling in all disciplines.</p>
-<p>Supersymmetry, often shortened to SUSY, is an additional space-time symmetry of nature. It is the only non-trivial extension of the Poincaré symmetry group. If supersymmetry is realized in nature, every known particle would have a supersymmetric partner particle, called a superpartner.</p>
-<p>In a theory with exact supersymmetry, each particle and its superpartner share identical quantum numbers and identical mass. Since we have never observed such light superpartners, supersymmetry, if it exists, must be broken.</p>
-<p>Supersymmetry is attractive because it can solve the famous hierarchy problem of the Standard Model. It also provides a well-motivated candidate for dark matter. The LHC Run 2 experiments carried out many searches for supersymmetric particles, but no clear evidence for SUSY has been found so far.</p>
-`,
-`
-<h2>Gravitational Waves: Ground-Based Interferometric Detectors</h2>
-<p>One hundred years after Albert Einstein predicted gravitational waves within his general theory of relativity, direct detection finally arrived in 2015. The LIGO observatories captured the signal from a merger of two distant black holes.</p>
-<p>Gravitational waves are ripples that travel through the fabric of spacetime itself, moving outward from violent cosmic events at the speed of light. As they pass through a region, they alternately stretch and squeeze space in perpendicular directions.</p>
-<p>Ground-based laser interferometers such as LIGO, Virgo and KAGRA are designed to measure these tiny distortions. The length changes they detect are far smaller than the diameter of a single proton.</p>
-<p>This new field, gravitational-wave astronomy, lets scientists observe events that emit little or no light. We can study merging black holes, colliding neutron stars and test gravity under extreme conditions.</p>
-`,
-`
-<h2>The Top Quark Discovery</h2>
-<p>The top quark is the heaviest elementary particle discovered to date. It was found by the CDF and D0 research groups at Fermilab in 1995, many years after the prediction of its existence.</p>
-<p>Its extremely large mass gives it unique properties. Unlike other quarks, the top quark decays so quickly that it does not form hadrons before decay. Physicists can therefore study the bare quark directly.</p>
-<p>The top quark has a Yukawa coupling to the Higgs boson close to one. This special relation is still not fully understood, and it is one of the key puzzles in modern particle physics.</p>
-<p>Precise measurements of the top quark help researchers test the Standard Model and search for signs of new physics that lies beyond our current framework.</p>
-`,
-`
-<h2>Real-time Data Analysis in Particle Physics</h2>
-<p>Particle physics collision experiments create huge volumes of data every second. The amount of information produced is far larger than can be fully stored by the detectors or recorded to disk.</p>
-<p>For this reason, experiments use fast, real-time filtering systems called triggers. These systems rapidly decide which collision events are interesting enough to save.</p>
-<p>Modern trigger systems combine fast hardware processors and software algorithms. They look for signatures such as high-energy jets, electrons, muons or missing transverse energy.</p>
-<p>Good trigger design is critical. It must keep rare interesting events while throwing away the huge flood of uninteresting background collisions. This online selection is the first step of the whole analysis chain.</p>
-`
-];
-
-function switchArticle(index){
-  document.getElementById("articleContainer").innerHTML = articleList[index];
-  document.querySelectorAll(".top-nav button").forEach((btn,i)=>{
-    btn.classList.toggle("active", i === index);
+const c=document.getElementById('c');
+const ctx=c.getContext('2d');
+let w=c.width=innerWidth,h=c.height=innerHeight;
+let pts=[];
+for(let i=0;i<80;i++){
+  pts.push({
+    x:Math.random()*w,
+    y:Math.random()*h,
+    vx:(Math.random()-0.5)*0.6,
+    vy:(Math.random()-0.5)*0.6
   })
 }
-switchArticle(0);
-
-// 虫子动画代码
-const canvas = document.getElementById("bugCanvas");
-const ctx = canvas.getContext("2d");
-let canvasW, canvasH;
-function resizeCanvas(){
-  canvasW = canvas.width = window.innerWidth;
-  canvasH = canvas.height = window.innerHeight;
-}
-resizeCanvas();
-window.addEventListener("resize", resizeCanvas);
-
-const bug = {
-  x: 0,
-  y: 0,
-  targetX: 0,
-  targetY: 0,
-  angle: 0,
-  moveSpeed: 3.6,
-  turnSpeed: 0.08,
-  legWave: 0,
-  size: 14
-};
-bug.x = canvasW / 2;
-bug.y = canvasH / 2;
-bug.targetX = bug.x;
-bug.targetY = bug.y;
-
-// 触屏+点击控制
-canvas.addEventListener("click", e=>{
-  bug.targetX = e.clientX;
-  bug.targetY = e.clientY;
-})
-canvas.addEventListener("touchstart", e=>{
-  e.preventDefault();
-  const touch = e.touches[0];
-  bug.targetX = touch.clientX;
-  bug.targetY = touch.clientY;
-}, {passive:false})
-
-function drawBug(){
-  const dx = bug.targetX - bug.x;
-  const dy = bug.targetY - bug.y;
-  const distance = Math.hypot(dx, dy);
-
-  if(distance > 1){
-    const aimAngle = Math.atan2(dy, dx);
-    let angleDiff = aimAngle - bug.angle;
-    while(angleDiff > Math.PI) angleDiff -= Math.PI*2;
-    while(angleDiff < -Math.PI) angleDiff += Math.PI*2;
-    bug.angle += angleDiff * bug.turnSpeed;
+function draw(){
+  ctx.clearRect(0,0,w,h);
+  for(let p of pts){
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.x<0||p.x>w)p.vx*=-1;
+    if(p.y<0||p.y>h)p.vy*=-1;
   }
-  if(distance > 2){
-    bug.x += Math.cos(bug.angle)*bug.moveSpeed;
-    bug.y += Math.sin(bug.angle)*bug.moveSpeed;
-    bug.legWave += 0.38;
+  for(let i=0;i<pts.length;i++){
+    for(let j=i+1;j<pts.length;j++){
+      let dx=pts[i].x-pts[j].x;
+      let dy=pts[i].y-pts[j].y;
+      let d=Math.hypot(dx,dy);
+      if(d<120){
+        ctx.beginPath();
+        ctx.strokeStyle=`rgba(0,204,255,${(120-d)/400})`;
+        ctx.moveTo(pts[i].x,pts[i].y);
+        ctx.lineTo(pts[j].x,pts[j].y);
+        ctx.stroke();
+      }
+    }
   }
-
-  ctx.save();
-  ctx.translate(bug.x, bug.y);
-  ctx.rotate(bug.angle);
-  const s = bug.size;
-  // 虫身分段
-  for(let i=4; i>=0; i--){
+  for(let p of pts){
     ctx.beginPath();
-    ctx.arc(-i*s*0.55, 0, s*(0.45 - i*0.04), 0, Math.PI*2);
-    ctx.fillStyle = i === 0 ? "#ff3838" : "#101010";
+    ctx.fillStyle='#0cf';
+    ctx.arc(p.x,p.y,3,0,Math.PI*2);
     ctx.fill();
-    ctx.strokeStyle="#0f0";
-    ctx.lineWidth=1;
-    ctx.stroke();
   }
-  // 六条腿
-  for(let i=0; i<6; i++){
-    const segX = -i*s*0.55 + s*0.4;
-    const swing = Math.sin(bug.legWave + i*1.15)*4.2;
-    ctx.beginPath();
-    ctx.moveTo(segX, s*0.25);
-    ctx.lineTo(segX + 6, s*0.92 + swing);
-    ctx.strokeStyle="#0f0";
-    ctx.lineWidth=1.2;
-    ctx.stroke();
-    ctx.beginPath();
-    ctx.moveTo(segX, -s*0.25);
-    ctx.lineTo(segX + 6, -s*0.92 - swing);
-    ctx.stroke();
-  }
-  // 触角
-  ctx.beginPath();
-  ctx.moveTo(s*0.5, s*0.15);
-  ctx.lineTo(s*1.1, s*0.52);
-  ctx.moveTo(s*0.5, -s*0.15);
-  ctx.lineTo(s*1.1, -s*0.52);
-  ctx.strokeStyle="#0f0";
-  ctx.lineWidth=1;
-  ctx.stroke();
-  ctx.restore();
-  // 目标标记圈
-  ctx.beginPath();
-  ctx.arc(bug.targetX, bug.targetY, 6, 0, Math.PI*2);
-  ctx.strokeStyle="rgba(0,255,136,0.8)";
-  ctx.lineWidth=1.5;
-  ctx.stroke();
+  requestAnimationFrame(draw);
 }
-function renderLoop(){
-  ctx.fillStyle = "rgba(0,0,0,0.36)";
-  ctx.fillRect(0,0,canvasW,canvasH);
-  drawBug();
-  requestAnimationFrame(renderLoop);
-}
-renderLoop();
+draw();
+addEventListener('resize',()=>{w=c.width=innerWidth;h=c.height=innerHeight})
 </script>
 </body>
 </html>
