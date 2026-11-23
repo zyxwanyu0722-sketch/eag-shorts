@@ -1,91 +1,80 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>动态网状背景</title>
+<title>Scholarpedia</title>
 <style>
-*{margin:0;padding:0}
-body{background:#000;overflow:hidden}
-canvas{display:block;position:fixed;top:0;left:0;z-index:1;}
-.box{
-  position:relative;
-  z-index:2;
-  width:100vw;
+*{margin:0;padding:0;box-sizing:border-box}
+body{
+  overflow:hidden;
+  background:#000;
   height:100vh;
   display:flex;
   align-items:center;
   justify-content:center;
 }
-a{
-  color:#00ccff;
-  font-size:22px;
+canvas{position:fixed;top:0;left:0;z-index:1}
+.btn{
+  position:relative;
+  z-index:2;
+  font-size:42px;
+  color:#0cf;
+  border:2px solid #0cf;
+  padding:24px 60px;
+  border-radius:16px;
+  background:transparent;
   text-decoration:none;
-  border:1px solid #00ccff;
-  padding:14px 26px;
-  border-radius:8px;
-  background:rgba(0,0,0,0.4);
-}
-a:hover{
-  background:#00ccff;
-  color:#000;
 }
 </style>
 </head>
 <body>
 <canvas id="c"></canvas>
-<div class="box">
-  <a href="https://scholarpedia.org" target="_blank">Scholarpedia</a>
-</div>
+<a class="btn" href="./graph.html">Scholarpedia</a>
 <script>
-const canvas = document.getElementById('c');
-const ctx = canvas.getContext('2d');
-function resize(){
-  canvas.width = innerWidth;
-  canvas.height = innerHeight;
-}
-resize();
-window.addEventListener('resize',resize);
-let dots = [];
-const count = 80;
-for(let i=0;i<count;i++){
-  dots.push({
-    x:Math.random()*canvas.width,
-    y:Math.random()*canvas.height,
-    vx:(Math.random()-0.5)*1.2,
-    vy:(Math.random()-0.5)*1.2
+const c=document.getElementById('c');
+const ctx=c.getContext('2d');
+let w=c.width=innerWidth,h=c.height=innerHeight;
+let pts=[];
+for(let i=0;i<80;i++){
+  pts.push({
+    x:Math.random()*w,
+    y:Math.random()*h,
+    vx:(Math.random()-0.5)*0.6,
+    vy:(Math.random()-0.5)*0.6
   })
 }
 function draw(){
-  ctx.clearRect(0,0,canvas.width,canvas.height);
-  for(let i=0;i<dots.length;i++){
-    let p = dots[i];
-    p.x += p.vx;
-    p.y += p.vy;
-    if(p.x<0||p.x>canvas.width)p.vx*=-1;
-    if(p.y<0||p.y>canvas.height)p.vy*=-1;
-    ctx.beginPath();
-    ctx.arc(p.x,p.y,2,0,Math.PI*2);
-    ctx.fillStyle="#00ccff";
-    ctx.fill();
-    for(let j=i+1;j<dots.length;j++){
-      let p2 = dots[j];
-      let dx = p.x-p2.x;
-      let dy = p.y-p2.y;
-      let d = Math.sqrt(dx*dx+dy*dy);
+  ctx.clearRect(0,0,w,h);
+  for(let p of pts){
+    p.x+=p.vx; p.y+=p.vy;
+    if(p.x<0||p.x>w)p.vx*=-1;
+    if(p.y<0||p.y>h)p.vy*=-1;
+  }
+  for(let i=0;i<pts.length;i++){
+    for(let j=i+1;j<pts.length;j++){
+      let dx=pts[i].x-pts[j].x;
+      let dy=pts[i].y-pts[j].y;
+      let d=Math.hypot(dx,dy);
       if(d<120){
         ctx.beginPath();
-        ctx.moveTo(p.x,p.y);
-        ctx.lineTo(p2.x,p2.y);
-        ctx.strokeStyle=`rgba(0,204,255,${1-d/120})`;
-        ctx.lineWidth=0.8;
+        ctx.strokeStyle=`rgba(0,204,255,${(120-d)/400})`;
+        ctx.moveTo(pts[i].x,pts[i].y);
+        ctx.lineTo(pts[j].x,pts[j].y);
         ctx.stroke();
       }
     }
   }
+  for(let p of pts){
+    ctx.beginPath();
+    ctx.fillStyle='#0cf';
+    ctx.arc(p.x,p.y,3,0,Math.PI*2);
+    ctx.fill();
+  }
   requestAnimationFrame(draw);
 }
 draw();
+addEventListener('resize',()=>{w=c.width=innerWidth;h=c.height=innerHeight})
 </script>
 </body>
 </html>
