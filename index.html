@@ -17,15 +17,31 @@
     height: 100vh;
     font-family: "Microsoft Yahei", sans-serif;
   }
-
+  .link-btn{
+    position:fixed;
+    z-index:10;
+    top:20px;
+    left:50%;
+    transform:translateX(-50%);
+    color:#00ff88;
+    border:1px solid #00ff88;
+    padding:10px 20px;
+    border-radius:6px;
+    text-decoration:none;
+    background:rgba(0,0,0,0.4);
+  }
+  .link-btn:hover{
+    background:#00ff88;
+    color:#000;
+  }
   #tip {
     position: fixed;
-    top: 12px;
+    bottom: 30px;
     left: 0;
     right: 0;
     text-align: center;
     color: #00ff88;
-    font-size: 14px;
+    font-size:14px;
     z-index: 10;
     letter-spacing: 2px;
     pointer-events: none;
@@ -41,7 +57,7 @@
 </style>
 </head>
 <body>
-
+<a class="link-btn" href="https://simple.wikipedia.org" target="_blank">Simple English Wikipedia</a>
 <div id="tip">点击屏幕任意位置，虫子会爬向那里</div>
 <canvas id="game"></canvas>
 
@@ -64,19 +80,17 @@ const bug = {
   targetX: 0,
   targetY: 0,
   angle: 0,
-  speed: 3.5,        // 移动速度
-  turnSpeed: 0.08,   // 转向速度
+  speed: 3.5,
+  turnSpeed: 0.08,
   legPhase: 0,
   size: 14
 };
 
-// 初始位置放中间
 bug.x = W / 2;
 bug.y = H / 2;
 bug.targetX = bug.x;
 bug.targetY = bug.y;
 
-// 点击设置目标点
 window.addEventListener("click", (e) => {
   bug.targetX = e.clientX;
   bug.targetY = e.clientY;
@@ -88,13 +102,11 @@ window.addEventListener("touchstart", (e) => {
   bug.targetY = t.clientY;
 }, { passive: true });
 
-// 画虫子：黑色身体 + 红色头 + 多足
 function drawBug() {
   const dx = bug.targetX - bug.x;
   const dy = bug.targetY - bug.y;
   const dist = Math.hypot(dx, dy);
 
-  // 朝向目标点
   if (dist > 1) {
     const targetAngle = Math.atan2(dy, dx);
     let diff = targetAngle - bug.angle;
@@ -103,7 +115,6 @@ function drawBug() {
     bug.angle += diff * bug.turnSpeed;
   }
 
-  // 向目标移动
   if (dist > 2) {
     bug.x += Math.cos(bug.angle) * bug.speed;
     bug.y += Math.sin(bug.angle) * bug.speed;
@@ -116,7 +127,6 @@ function drawBug() {
 
   const s = bug.size;
 
-  // 身体分节
   for (let i = 4; i >= 0; i--) {
     ctx.beginPath();
     ctx.arc(-i * s * 0.55, 0, s * (0.45 - i * 0.04), 0, Math.PI * 2);
@@ -127,7 +137,6 @@ function drawBug() {
     ctx.stroke();
   }
 
-  // 腿
   const legCount = 6;
   for (let i = 0; i < legCount; i++) {
     const segX = -i * s * 0.55 + s * 0.4;
@@ -146,7 +155,6 @@ function drawBug() {
     ctx.stroke();
   }
 
-  // 触角
   ctx.beginPath();
   ctx.moveTo(s * 0.5, s * 0.15);
   ctx.lineTo(s * 1.1, s * 0.5);
@@ -158,7 +166,6 @@ function drawBug() {
 
   ctx.restore();
 
-  // 目标点标记
   ctx.beginPath();
   ctx.arc(bug.targetX, bug.targetY, 6, 0, Math.PI * 2);
   ctx.strokeStyle = "rgba(0, 255, 136, 0.8)";
