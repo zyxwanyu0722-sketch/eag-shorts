@@ -1,9 +1,9 @@
 <!DOCTYPE html>
-<html lang="zh-CN">
+<html lang="en">
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>爬虫可视化</title>
+<title>English Reading Site</title>
 <style>
   * {
     margin: 0;
@@ -16,33 +16,43 @@
     height: 100vh;
     font-family: "Microsoft Yahei", sans-serif;
   }
-  .link-btn{
+  /* 英文文章容器 */
+  .article-box{
     position:fixed;
     z-index:10;
-    top:20px;
+    top:50%;
     left:50%;
-    transform:translateX(-50%);
-    color:#00ff88;
+    transform:translate(-50%,-50%);
+    width:90%;
+    max-width:700px;
+    max-height:75vh;
+    overflow-y:auto;
+    padding:24px;
+    background:rgba(0,0,0,0.72);
     border:1px solid #00ff88;
-    padding:10px 20px;
-    border-radius:6px;
-    text-decoration:none;
-    background:rgba(0,0,0,0.4);
+    border-radius:10px;
+    color:#eee;
+    line-height:1.7;
+    font-size:16px;
   }
-  .link-btn:hover{
-    background:#00ff88;
-    color:#000;
+  .article-box h2{
+    color:#00ff88;
+    margin-bottom:14px;
+    font-size:20px;
+  }
+  .article-box p{
+    margin-bottom:12px;
   }
   #tip {
     position: fixed;
-    bottom: 30px;
+    bottom: 20px;
     left: 0;
     right: 0;
     text-align: center;
     color: #00ff88;
-    font-size:14px;
+    font-size:13px;
     z-index: 10;
-    letter-spacing: 2px;
+    letter-spacing: 1px;
     pointer-events: none;
   }
   canvas {
@@ -55,8 +65,17 @@
 </style>
 </head>
 <body>
-<a class="link-btn" href="https://scholarpedia.org" target="_blank">Scholarpedia</a>
-<div id="tip">点击屏幕任意位置，虫子会爬向那里</div>
+<!-- 英文文章，在这里改文字 -->
+<div class="article-box">
+<h2>Supersymmetry (SUSY)</h2>
+<p>The idea of exploiting potential symmetries of a physical system to impose constraints on the system's Lagrangian, and therefore on the equations of motion, has been a very fertile one. It has been used successfully in virtually all branches of physics, from classical mechanics to contemporary applications to physical modelling in all disciplines.</p>
+<p>Supersymmetry (SUSY) is an additional space-time symmetry of nature. In fact, it is the only way to extend space-time symmetries to internal symmetries. If SUSY is a good symmetry for a physical system, then the system is invariant for an operator that transforms all bosons into fermions and vice versa, thus restoring a symmetry between the matter and force fields.</p>
+<p>In a model for which supersymmetry is an exact symmetry of nature, all quantum numbers of the supersymmetric partners are the same as those of their standard counterparts. This means also that the masses of the supersymmetric particles should be equal to those of their standard partners. This is clearly not the case, or we would have had a supersymmetric electron, or selectron with a mass of 511 keV: supersymmetry must be broken.</p>
+<p>One famous motivation for SUSY is the hierarchy problem. Fermionic loops induce quantum corrections to the mass of scalars that grow with the square of the energy scale involved. SUSY cancels these quadratically growing fermionic corrections with equivalent corrections from the corresponding superpartners.</p>
+<p>Another appealing feature is that SUSY may introduce new neutral stable particles. If they interact only weakly with ordinary matter, they may be a suitable candidate for explaining the cold dark matter relic density.</p>
+</div>
+
+<div id="tip">Click anywhere, the bug will crawl there</div>
 <canvas id="game"></canvas>
 
 <script>
