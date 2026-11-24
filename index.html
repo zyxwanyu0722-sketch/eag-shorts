@@ -1,256 +1,592 @@
-<!DOCTYPE html>
-<html lang="zh-CN">
-<head>
-<meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>橙橙鱼 三维拆解</title>
-<style>
-*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui, sans-serif;}
-body{background:#fff;color:#333;overflow:hidden;height:100vh;display:flex;flex-direction:column;}
-.header{padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;}
-.title{font-size:18px;font-weight:bold;}
-.info{font-size:13px;color:#777;}
-.main{flex:1;display:grid;grid-template-columns:1fr 280px;}
-@media(max-width:768px){
-  .main{grid-template-columns:1fr;grid-template-rows:1fr auto;}
+import math
+import numpy as np
+import moderngl
+import glfw
+
+# ===================== 全局常量 =====================
+WIN_W, WIN_H = 1400, 850
+
+# 粒子数量
+N_FLOW = 100000
+N_WING = 14000
+N_BODY = 500
+N_ANT = 60
+N_TIP = 30
+N_BTF_ONE = N_WING + N_BODY + N_ANT + N_TIP
+N_BTF = N_BTF_ONE * 2
+N_STARS = 5000
+
+UP = np.array([0.0, 0.0, 1.0])
+
+# 流场参数
+FLOW_R = 210.0
+FLOW_T = 9.0
+WIND_P = 9.0
+WIND_D = 0.50
+WIND_R = 82.0
+WIND_H = 68.0
+
+STORM_PULSES = [(1.0, 3.0, 5.5), (7.0, 9.0, 11.5)]
+STORM_GAIN = 1.6
+
+MERGE_END = np.array([6.0, 12.0])
+PHASE_OFFSET = np.array([0.0, np.pi])
+
+# 轨道参数
+ORBIT_R = 110.0
+ORBIT_W = 0.22
+ORBIT_ZAMP = 10.0
+ORBIT_CZ = 135.0
+ORBIT_T0 = 6.0
+
+# 蝴蝶参数
+BT_H = ORBIT_CZ
+BT_S = 4.8
+BT_FLAP_FREQ = 1.5
+BT_FLAP_DOWN = 0.40
+BT_FLAP_MIN = 0.40
+BT_FLAP_MAX = 1.40
+
+# 相机
+CAM_DIST = 500.0
+CAM_H = 220.0
+CAM_W = 0.040
+
+rng = np.random.default_rng(23)
+
+# ===================== 工具函数 =====================
+def hsv2rgb(h, s, v):
+    h = np.asarray(h)
+    s = np.asarray(s)
+    v = np.asarray(v)
+    i = np.floor(h * 6.0).astype(int)
+    f = h * 6.0 - i
+    p = v * (1.0 - s)
+    q = v * (1.0 - f * s)
+    t = v * (1.0 - (1.0 - f) * s)
+    i = i % 6
+    r = np.choose(i, [v, q, p, p, t, v])
+    g = np.choose(i, [t, v, v, q, p, p])
+    b = np.choose(i, [p, p, t, v, v, q])
+    return np.stack([r, g, b], 1)
+
+
+def sstep(a, b, x):
+    t = np.clip((x - a) / (b - a), 0.0, 1.0)
+    return t * t * (3.0 - 2.0 * t)
+
+
+def storm_pulse(t, a, b, c, g=1.6):
+    if t < a:
+        return 1.0
+    if t < b:
+        u = (t - a) / (b - a)
+        return 1.0 + (g - 1.0) * (u ** 2.2)
+    if t < c:
+        u = (t - b) / (c - b)
+        return 1.0 + (g - 1.0) * (1.0 - sstep(0.0, 1.0, u))
+    return 1.0
+
+
+def storm_i(t):
+    v = 1.0
+    for a, b, c in STORM_PULSES:
+        v = max(v, storm_pulse(t, a, b, c, STORM_GAIN))
+    return v
+
+
+def orbit_frame(t, off):
+    ph = ORBIT_W * (t - ORBIT_T0) + off
+    px = ORBIT_R * np.cos(ph)
+    py = ORBIT_R * np.sin(ph)
+    pz = ORBIT_CZ + ORBIT_ZAMP * np.sin(ph)
+
+    dx = -ORBIT_R * ORBIT_W * np.sin(ph)
+    dy = ORBIT_R * ORBIT_W * np.cos(ph)
+    dz = ORBIT_ZAMP * ORBIT_W * np.cos(ph)
+
+    tn = np.sqrt(dx*dx + dy*dy + dz*dz) + 1e-9
+    fx, fy, fz = dx/tn, dy/tn, dz/tn
+
+    rx, ry, rz = fy, -fx, np.zeros_like(fx)
+    rn = np.sqrt(rx*rx + ry*ry) + 1e-9
+    rx, ry = rx/rn, ry/rn
+
+    ux = ry*fz - rz*fy
+    uy = rz*fx - rx*fz
+    uz = rx*fy - ry*fx
+    return (px, py, pz), (fx, fy, fz), (rx, ry, rz), (ux, uy, uz)
+
+
+def flap_s(tb):
+    tb = np.maximum(tb, 0.0)
+    p = (tb * BT_FLAP_FREQ) % 1.0
+    w = np.where(p < BT_FLAP_DOWN,
+                 (p / BT_FLAP_DOWN) * 0.5,
+                 0.5 + (p - BT_FLAP_DOWN) / (1.0 - BT_FLAP_DOWN) * 0.5)
+    s = np.cos(w * 2.0 * np.pi)
+    return np.where(tb <= 0, 1.0, s)
+
+
+def bt_local(tb, lx, ly, lz, xm, fw):
+    s = flap_s(tb)
+    base = BT_FLAP_MIN + (BT_FLAP_MAX - BT_FLAP_MIN) * (s + 1.0) * 0.5
+    tip = np.clip(np.abs(lx) / xm, 0.0, 1.0)
+    flap = base * (0.7 + 0.3 * tip) * fw
+    sd = np.where(lx >= 0, 1.0, -1.0)
+    a = flap * sd
+    ca, sa = np.cos(a), np.sin(a)
+    rx = lx * ca - lz * sa
+    rz = lx * sa + lz * ca
+    ry = -ly
+    return rx, ry, rz
+
+
+def flow_fld(x0, y0, t):
+    dx = np.zeros_like(x0)
+    dy = np.zeros_like(y0)
+    dz = np.zeros_like(x0)
+    waves = [
+        (0.040, 0.015, 0.42, 150.0),
+        (-0.028, 0.052, 0.31, 105.0),
+        (0.065, -0.045, 0.71, 60.0),
+        (0.022, 0.085, 0.55, 45.0),
+        (-0.060, -0.070, 0.88, 33.0)
+    ]
+    for kx, ky, w, a in waves:
+        arg = kx * x0 + ky * y0 - w * t
+        c, s = np.cos(arg), np.sin(arg)
+        dx += a * ky * c
+        dy -= a * kx * c
+        dz += 0.015 * a * s
+    mp = np.sin(0.040 * x0 + 0.015 * y0 - 0.42 * t)
+    return dx, dy, dz, mp
+
+# ===================== 初始化函数 =====================
+def init_flow():
+    n = N_FLOW
+    u = rng.random(n)
+    r0 = FLOW_R * 0.98 * np.sqrt(u)
+    th = rng.uniform(0.0, 2.0 * math.pi, n)
+    x0 = r0 * np.cos(th)
+    y0 = r0 * np.sin(th)
+    d = r0 / FLOW_R
+    sig = FLOW_T * (0.4 + 0.8 * d)
+    z0 = rng.normal(0.0, 1.0, n) * sig
+
+    col = hsv2rgb(rng.uniform(0.82, 0.99, n),
+                  0.92 + 0.08 * rng.random(n),
+                  0.46 + 0.14 * rng.random(n))
+    sz = (1.6 + 3.2 * rng.random(n) ** 1.5) * 1.5
+    neb = rng.random(n) < 0.008
+    sz = np.where(neb, rng.uniform(18.0, 39.0, n), sz)
+    br = 0.32 + 0.18 * rng.random(n)
+    br = np.where(neb, rng.uniform(0.04, 0.09, n), br)
+
+    return dict(
+        x0=x0, y0=y0, z0=z0, d=d,
+        base_col=col, base_size=sz, bright0=br,
+        wind_offset=rng.normal(0.0, 0.06, n),
+        jit_phase=rng.uniform(0.0, 2.0 * math.pi, n),
+        jit_speed=rng.uniform(0.8, 2.0, n),
+        tw_speed=rng.uniform(0.4, 2.5, n),
+        tw_phase=rng.uniform(0.0, 2.0 * math.pi, n)
+    )
+
+
+def build_bt(S, rl):
+    nb, na, nt, n = N_BODY, N_ANT, N_TIP, N_BTF_ONE
+    ib0, ib1 = N_WING, N_WING + nb
+    ia0, ia1 = ib1, ib1 + na
+    it0 = ia1
+
+    bx = np.zeros(n)
+    by = np.zeros(n)
+    bz = np.zeros(n)
+    fw = np.ones(n)
+
+    tt = rl.uniform(0.0, 12.0 * np.pi, N_WING)
+    rr = np.exp(np.cos(tt)) - 2.0 * np.cos(4.0 * tt) + np.sin(tt / 12.0) ** 5
+    edge = rl.random(N_WING) < 0.50
+    ke = np.sqrt(rl.uniform(0.72, 1.0, N_WING))
+    ki = np.sqrt(rl.uniform(0.0, 0.72, N_WING))
+    kk = np.where(edge, ke, ki)
+    js = np.where(edge, 0.06, 0.15)
+
+    bx[:N_WING] = rr * np.sin(tt) * kk * S * 3.0 + rl.normal(0.0, js * S, N_WING)
+    by[:N_WING] = rr * np.cos(tt) * kk * S * 3.0 + rl.normal(0.0, js * S, N_WING)
+    bz[:N_WING] = rl.normal(0.0, 0.10 * S, N_WING)
+
+    btt = rl.random(nb)
+    bly = (5.0 - 7.0 * btt) * S
+    br = (0.45 - 0.30 * btt) * S
+    bang = rl.uniform(0.0, 2.0 * np.pi, nb)
+    brad = br * np.sqrt(rl.random(nb))
+    bx[ib0:ib1] = brad * np.cos(bang) + rl.normal(0.0, 0.03 * S, nb)
+    by[ib0:ib1] = bly + rl.normal(0.0, 0.03 * S, nb)
+    bz[ib0:ib1] = brad * np.sin(bang) + rl.normal(0.0, 0.03 * S, nb)
+    fw[ib0:ib1] = 0.0
+
+    hy = 5.0
+    pa = na // 2
+    sd = np.concatenate([np.full(pa, 1.0), np.full(pa, -1.0)])
+    au = np.concatenate([np.linspace(0.05, 0.95, pa), np.linspace(0.05, 0.95, pa)])
+    au = np.clip(au + rl.normal(0.0, 0.03, na), 0.0, 1.0)
+    om = 1.0 - au
+
+    p0y = hy * S
+    p1x, p1y, p1z = sd * 0.25 * S, (hy + 0.9) * S, 0.4 * S
+    p2x, p2y, p2z = sd * 0.70 * S, (hy + 1.7) * S, 1.0 * S
+    p3x, p3y, p3z = sd * 0.95 * S, (hy + 2.4) * S, 1.8 * S
+
+    alx = 3*om**2*au*p1x + 3*om*au**2*p2x + au**3*p3x
+    aly = om**3*p0y + 3*om**2*au*p1y + 3*om*au**2*p2y + au**3*p3y
+    alz = 3*om**2*au*p1z + 3*om*au**2*p2z + au**3*p3z
+    alx += rl.normal(0.0, 0.05 * S, na)
+    aly += rl.normal(0.0, 0.05 * S, na)
+    alz += rl.normal(0.0, 0.05 * S, na)
+    bx[ia0:ia1] = alx
+    by[ia0:ia1] = aly
+    bz[ia0:ia1] = alz
+    fw[ia0:ia1] = 0.0
+
+    pt = nt // 2
+    tsd = np.concatenate([np.full(pt, 1.0), np.full(pt, -1.0)])
+    tr = 0.12 * S
+    tph = rl.uniform(0.0, 2.0 * np.pi, nt)
+    tct = rl.uniform(-1.0, 1.0, nt)
+    tst = np.sqrt(1.0 - tct ** 2)
+    tk = rl.random(nt) ** (1.0 / 3.0)
+    bx[it0:] = tsd * 0.95 * S + tr * tk * tst * np.cos(tph)
+    by[it0:] = (hy + 2.4) * S + tr * tk * tst * np.sin(tph)
+    bz[it0:] = 1.8 * S + tr * tk * tct
+    fw[it0:] = 0.0
+
+    fcol = hsv2rgb(rl.uniform(0.82, 0.99, n),
+                   0.92 + 0.08 * rl.random(n),
+                   0.50 + 0.15 * rl.random(n))
+    fcol[ib0:ib1] = hsv2rgb(np.full(nb, 0.88), np.full(nb, 0.92), np.full(nb, 0.45))
+    tcol = fcol.copy()
+    tcol[ia0:ia1] = hsv2rgb(np.full(na, 0.96), np.full(na, 0.92), np.full(na, 0.82))
+    tcol[it0:] = hsv2rgb(rl.uniform(0.75, 0.82, nt),
+                         np.full(nt, 0.95), np.full(nt, 0.62))
+    sz = 2.5 + 1.5 * rl.random(n)
+    sz[ib0:ib1] = 2.8 + 1.0 * rl.random(nb)
+    szm = np.ones(n)
+    szm[it0:] = 2.0
+    brm = np.ones(n)
+    brm[ib0:ib1] = 1.0
+    brm[ia0:ia1] = 1.3
+    brm[it0:] = 1.4
+    is_tip = np.arange(n) >= it0
+    is_at = (np.arange(n) >= ia0).astype(np.float64)
+    xm = float(np.abs(bx).max()) + 1e-6
+
+    return dict(
+        btf_x=bx, btf_y=by, btf_z=bz, flap_weight=fw,
+        fly_col=fcol, target_col=tcol,
+        size_mult=szm, bright_mult=brm,
+        is_tip=is_tip, is_ant_or_tip=is_at,
+        base_size=sz, base_bright=0.9 + 0.2 * rl.random(n),
+        x_max=xm
+    )
+
+
+def init_bt():
+    rl = np.random.default_rng(7)
+    pieces = [build_bt(BT_S, rl) for _ in range(2)]
+    def cat(k):
+        return np.concatenate([p[k] for p in pieces], axis=0)
+    bid = np.repeat(np.arange(2), N_BTF_ONE)
+    me = MERGE_END[bid]
+    po = PHASE_OFFSET[bid]
+    rb = 80.0 * np.sqrt(rl.random(N_BTF))
+    thb = rl.uniform(0.0, 2.0 * np.pi, N_BTF)
+    sx = rb * np.cos(thb)
+    sy = rb * np.sin(thb)
+    sz = rl.normal(0.0, 3.0, N_BTF)
+    ph = 40.0 + 60.0 * np.exp(-rb / 50.0) + rl.normal(0.0, 4.5, N_BTF)
+    at = me - rl.uniform(0.0, 1.0, N_BTF)
+    tt = 1.5 + 0.5 * rl.random(N_BTF)
+    dt = at - tt
+
+    return dict(
+        btf_id=bid, merge_end=me, phase_offset=po,
+        start_x=sx, start_y=sy, start_z=sz,
+        btf_x=cat('btf_x'), btf_y=cat('btf_y'), btf_z=cat('btf_z'),
+        flap_weight=cat('flap_weight'),
+        fly_col=cat('fly_col'), target_col=cat('target_col'),
+        size_mult=cat('size_mult'), bright_mult=cat('bright_mult'),
+        is_tip=cat('is_tip'), is_ant_or_tip=cat('is_ant_or_tip'),
+        depart_t=dt, arrive_t=at, travel_t=tt,
+        peak_height=ph, x_max=pieces[0]['x_max'],
+        base_size=cat('base_size'), base_bright=cat('base_bright')
+    )
+
+
+def init_stars():
+    n = N_STARS
+    nf = int(n * 0.55)
+    nm = int(n * 0.30)
+    nn = n - nf - nm
+    parts = []
+
+    d = rng.normal(size=(nf, 3))
+    d /= np.linalg.norm(d, axis=1, keepdims=True)
+    r = rng.uniform(1050.0, 1500.0, nf)
+    parts.append(dict(
+        world=d*r[:, None],
+        col=hsv2rgb(rng.uniform(0.55, 0.72, nf), rng.uniform(0.05, 0.35, nf), rng.uniform(0.45, 0.75, nf)),
+        size=rng.uniform(1.4, 3.0, nf), bright=rng.uniform(0.10, 0.22, nf),
+        tw_speed=rng.uniform(0.2, 1.0, nf), tw_phase=rng.uniform(0.0, 2.0*math.pi, nf)
+    ))
+
+    d = rng.normal(size=(nm, 3))
+    d /= np.linalg.norm(d, axis=1, keepdims=True)
+    r = rng.uniform(675.0, 1125.0, nm)
+    parts.append(dict(
+        world=d*r[:, None],
+        col=hsv2rgb(rng.uniform(0.72, 0.95, nm), rng.uniform(0.30, 0.65, nm), rng.uniform(0.55, 0.85, nm)),
+        size=rng.uniform(2.7, 4.8, nm), bright=rng.uniform(0.22, 0.45, nm),
+        tw_speed=rng.uniform(0.3, 1.5, nm), tw_phase=rng.uniform(0.0, 2.0*math.pi, nm)
+    ))
+
+    d = rng.normal(size=(nn, 3))
+    d /= np.linalg.norm(d, axis=1, keepdims=True)
+    r = rng.uniform(420.0, 750.0, nn)
+    sn = rng.uniform(3.8, 7.5, nn)
+    bn = rng.uniform(0.35, 0.75, nn)
+    neb = rng.random(nn) < 0.06
+    sn = np.where(neb, rng.uniform(12.0, 24.0, nn), sn)
+    bn = np.where(neb, rng.uniform(0.06, 0.18, nn), bn)
+    parts.append(dict(
+        world=d*r[:, None],
+        col=hsv2rgb(rng.uniform(0.80, 0.99, nn), rng.uniform(0.40, 0.85, nn), rng.uniform(0.70, 1.00, nn)),
+        size=sn, bright=bn,
+        tw_speed=rng.uniform(0.4, 1.8, nn), tw_phase=rng.uniform(0.0, 2.0*math.pi, nn)
+    ))
+
+    w = np.concatenate([p['world'] for p in parts], axis=0)
+    w[:, 2] += 120.0
+    return dict(
+        world=w,
+        col=np.concatenate([p['col'] for p in parts], axis=0),
+        size=np.concatenate([p['size'] for p in parts], axis=0),
+        bright=np.concatenate([p['bright'] for p in parts], axis=0),
+        tw_speed=np.concatenate([p['tw_speed'] for p in parts], axis=0),
+        tw_phase=np.concatenate([p['tw_phase'] for p in parts], axis=0)
+    )
+
+# ===================== 更新函数 =====================
+def update_stars(t, s, ps):
+    tw = 0.65 + 0.35 * np.sin(t * s['tw_speed'] + s['tw_phase'])
+    return s['world'], s['col'], s['bright'] * tw, s['size'] * ps
+
+
+def update_flow(t, f, ps):
+    I = storm_i(t)
+    x0, y0, z0, d = f['x0'], f['y0'], f['z0'], f['d']
+    dx, dy, dz, mp = flow_fld(x0, y0, t)
+    ef = 1.0 - sstep(0.75, 0.95, d)
+    dx *= ef
+    dy *= ef
+    dz *= ef
+    jp, js = f['jit_phase'], f['jit_speed']
+    dx += 1.05 * np.sin(t * js + jp) * I
+    dy += 1.05 * np.cos(t * js * 1.1 + jp * 1.3) * I
+    dist = np.sqrt(x0 * x0 + y0 * y0)
+    lt = np.mod(t / WIND_P + f['wind_offset'], 1.0)
+    lc = np.where(lt < WIND_D, np.sin(np.pi * lt / WIND_D), 0.0)
+    rf = np.clip(1.0 - dist / WIND_R, 0.0, 1.0) ** 1.5
+    lift = WIND_H * lc * rf * I
+    fx = x0 + dx
+    fy = y0 + dy
+    fz = z0 + dz + lift
+    world = np.stack([fx, fy, fz], axis=-1)
+    tw = 0.78 + 0.22 * np.sin(t * f['tw_speed'] + f['tw_phase'])
+    ed = 1.0 - sstep(0.84, 0.98, d)
+    br = f['bright0'] * tw * (0.40 + 0.60 * ed)
+    br *= (1.0 + 0.18 * mp)
+    br *= (0.7 + 0.5 * I)
+    br = np.clip(br, 0.0, 1.5)
+    return world, f['base_col'], br, f['base_size'] * ps
+
+
+def update_bt(t, b, ps):
+    p_pos, p_fwd, p_right, p_up = orbit_frame(t, b['phase_offset'])
+    tb = np.maximum(0.0, t - b['merge_end'])
+    rx, ry, rz = bt_local(tb, b['btf_x'], b['btf_y'], b['btf_z'],
+                          b['x_max'], b['flap_weight'])
+    wx = p_pos[0] + rx * p_right[0] - ry * p_fwd[0] + rz * p_up[0]
+    wy = p_pos[1] + rx * p_right[1] - ry * p_fwd[1] + rz * p_up[1]
+    wz = p_pos[2] + rx * p_right[2] - ry * p_fwd[2] + rz * p_up[2]
+    pr = (t - b['depart_t']) / b['travel_t']
+    pc = np.clip(pr, 0.0, 1.0)
+    p = pc * pc * (3.0 - 2.0 * pc)
+    cb = 0.25
+    p1x = b['start_x'] * (1.0 - cb) + wx * cb
+    p1y = b['start_y'] * (1.0 - cb) + wy * cb
+    p1z = b['start_z'] + b['peak_height']
+    om = 1.0 - p
+    px = om*om*b['start_x'] + 2*om*p*p1x + p*p*wx
+    py = om*om*b['start_y'] + 2*om*p*p1y + p*p*wy
+    pz = om*om*b['start_z'] + 2*om*p*p1z + p*p*wz
+    alpha = sstep(0.0, 0.10, pc)
+    cbm = sstep(0.85, 0.99, pc) * b['is_ant_or_tip']
+    col = b['fly_col'] * (1.0 - cbm[:, None]) + b['target_col'] * cbm[:, None]
+    sm = 1.0 + (b['size_mult'] - 1.0) * cbm
+    bm = 1.0 + (b['bright_mult'] - 1.0) * cbm
+    tp = 0.90 + 0.10 * np.sin(t * 5.0)
+    ta = b['is_tip'] & (pc >= 0.99)
+    bm = np.where(ta, bm * (1.1 * tp), bm)
+    sm = np.where(ta, sm * (1.0 + 0.08 * np.sin(t * 5.0)), sm)
+    br = b['base_bright'] * bm * alpha
+    sz = b['base_size'] * ps * sm
+    world = np.stack([px, py, pz], axis=-1)
+    return world, col, br, sz
+
+# ===================== GLSL Shader =====================
+VS = """
+#version 330
+in vec3 in_pos;
+in vec3 in_col;
+in float in_size;
+in float in_bright;
+uniform mat4 mvp;
+uniform float pscale;
+out vec3 v_col;
+out float v_bright;
+void main() {
+    gl_Position = mvp * vec4(in_pos, 1.0);
+    v_col = in_col;
+    v_bright = in_bright;
+    gl_PointSize = clamp(in_size * pscale, 1.0, 120.0);
 }
-#canvasWrap{position:relative;background:#fcfcfc;}
-canvas{display:block;width:100%;height:100%;}
-.panel{padding:16px;border-left:1px solid #eee;display:flex;flex-direction:column;gap:14px;}
-@media(max-width:768px){
-  .panel{border-left:none;border-top:1px solid #eee;}
+"""
+
+FS = """
+#version 330
+in vec3 v_col;
+in float v_bright;
+out vec4 f_color;
+void main() {
+    vec2 d = gl_PointCoord - 0.5;
+    float r2 = dot(d, d) * 4.0;
+    float core = exp(-r2 * 5.0);
+    float halo = exp(-r2 * 1.5) * 0.4;
+    float mask = smoothstep(1.0, 0.86, r2);
+    float intensity = (core + halo) * mask;
+    f_color = vec4(v_col * intensity * v_bright, 1.0);
 }
-.sliderWrap{display:flex;flex-direction:column;gap:6px;}
-.sliderWrap label{font-size:14px;}
-input[type="range"]{width:100%;}
-.btn-group{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
-button{padding:8px;border:1px solid #ddd;background:#fff;border-radius:4px;cursor:pointer;font-size:14px;}
-button.active{background:#333;color:#fff;border-color:#333;}
-.selectWrap{display:flex;flex-direction:column;gap:6px;}
-select{padding:7px;border:1px solid #ddd;border-radius:4px;}
-.btns-single{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
-</style>
-</head>
-<body>
-<div class="header">
-  <div class="title">橙橙鱼 三维拆解</div>
-  <div class="info">19片面布 · 4片响纸</div>
-</div>
-<div class="main">
-  <div id="canvasWrap"></div>
-  <div class="panel">
-    <div class="sliderWrap">
-      <label>拆分进度：<span id="progressVal">0</span>%</label>
-      <input id="splitSlider" type="range" min="0" max="100" value="0">
-    </div>
-    <div class="btn-group">
-      <button id="btnCombine">组合成鱼</button>
-      <button id="btnExplode">空间拆解</button>
-      <button id="btnPlay">播放拆合</button>
-      <button id="btnRotate">自动旋转</button>
-    </div>
-    <div class="selectWrap">
-      <label>单片查看</label>
-      <select id="pieceSelect">
-        <option value="">点选模型或选择裁片</option>
-      </select>
-      <div class="btns-single">
-        <button id="btnTakeOut">拆出这片</button>
-        <button id="btnPutBack">装回这片</button>
-      </div>
-    </div>
-  </div>
-</div>
+"""
 
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
-<script>
-// 初始化场景
-const scene = new THREE.Scene();
-scene.background = new THREE.Color(0xfcfcfc);
-const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
-camera.position.z = 6;
-const renderer = new THREE.WebGLRenderer({antialias:true});
-renderer.setPixelRatio(window.devicePixelRatio);
-renderer.setSize(document.getElementById('canvasWrap').clientWidth, document.getElementById('canvasWrap').clientHeight);
-document.getElementById('canvasWrap').appendChild(renderer.domElement);
-const controls = new THREE.OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05;
+# ===================== 矩阵工具 =====================
+def persp(fov, asp, n, f):
+    t = 1.0 / math.tan(fov / 2.0)
+    m = np.zeros((4, 4), dtype='f4')
+    m[0, 0] = t / asp
+    m[1, 1] = t
+    m[2, 2] = (f + n) / (n - f)
+    m[2, 3] = 2.0 * f * n / (n - f)
+    m[3, 2] = -1.0
+    return m
 
-// 灯光
-const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
-scene.add(ambLight);
-const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-dirLight.position.set(4,5,4);
-scene.add(dirLight);
 
-// 材质（毛绒、灯芯绒、波点）
-const matFur = new THREE.MeshStandardMaterial({color:0xff7722,roughness:0.85,metalness:0.01});
-const matCorduroy = new THREE.MeshStandardMaterial({color:0xc9882e,roughness:0.9,metalness:0});
-const matRedCord = new THREE.MeshStandardMaterial({color:0xdd3344,roughness:0.9,metalness:0});
-const matDot = new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.75,metalness:0});
-const matEye = new THREE.MeshStandardMaterial({color:0xeeeeee,roughness:0.6});
-const matPupil = new THREE.MeshStandardMaterial({color:0x111111,roughness:0.2});
+def look_at(e, t, u):
+    e = np.asarray(e, dtype='f4')
+    t = np.asarray(t, dtype='f4')
+    u = np.asarray(u, dtype='f4')
+    f = t - e
+    f /= np.linalg.norm(f)
+    s = np.cross(f, u)
+    s /= np.linalg.norm(s)
+    up = np.cross(s, f)
+    m = np.eye(4, dtype='f4')
+    m[0, :3] = s
+    m[1, :3] = up
+    m[2, :3] = -f
+    m[0, 3] = -s.dot(e)
+    m[1, 3] = -up.dot(e)
+    m[2, 3] = f.dot(e)
+    return m
 
-// 存放所有裁片
-const pieces = [];
-const pieceGroup = new THREE.Group();
-scene.add(pieceGroup);
+# ===================== 主循环 =====================
+def main():
+    glfw.init()
+    glfw.window_hint(glfw.CONTEXT_VERSION_MAJOR, 3)
+    glfw.window_hint(glfw.CONTEXT_VERSION_MINOR, 3)
+    glfw.window_hint(glfw.OPENGL_PROFILE, glfw.OPENGL_CORE_PROFILE)
+    win = glfw.create_window(WIN_W, WIN_H, "双蝶", None, None)
+    glfw.make_context_current(win)
+    glfw.swap_interval(1)
 
-// 生成鱼主体裁片（翻瓣散开，和你截图拆解样式一致）
-function createPieces(){
-  pieceGroup.clear();
-  pieces.length = 0;
+    ctx = moderngl.create_context()
+    ctx.enable(moderngl.BLEND)
+    ctx.enable(moderngl.PROGRAM_POINT_SIZE)
+    ctx.blend_func = moderngl.ONE, moderngl.ONE
 
-  // 身体主瓣 8片
-  const countBody = 8;
-  for(let i=0;i<countBody;i++){
-    const geo = new THREE.SphereGeometry(1.6,12,6, Math.PI*2/countBody*i, Math.PI*2/countBody*0.85);
-    const m = new THREE.Mesh(geo, matFur);
-    m.userData.basePos = m.position.clone();
-    m.userData.axis = new THREE.Vector3(0,1,0);
-    m.userData.rotateDir = (i%2===0)?1:-1;
-    pieceGroup.add(m);
-    pieces.push(m);
-  }
-  // 背鳍
-  const g1 = new THREE.BoxGeometry(1.2,0.6,0.25);
-  const finTop = new THREE.Mesh(g1, matCorduroy);
-  finTop.position.set(0,1.4,0);
-  finTop.userData.basePos = finTop.position.clone();
-  finTop.userData.axis = new THREE.Vector3(1,0,0);
-  finTop.userData.rotateDir = 1;
-  pieceGroup.add(finTop); pieces.push(finTop);
+    flow = init_flow()
+    btf = init_bt()
+    stars = init_stars()
 
-  // 尾鳍
-  const g2 = new THREE.BoxGeometry(0.8,0.7,0.2);
-  const finTail = new THREE.Mesh(g2, matCorduroy);
-  finTail.position.set(-1.7,0,0);
-  finTail.userData.basePos = finTail.position.clone();
-  finTail.userData.axis = new THREE.Vector3(0,0,1);
-  finTail.userData.rotateDir = -1;
-  pieceGroup.add(finTail); pieces.push(finTail);
+    n_f = N_FLOW
+    n_b = N_BTF
+    n_s = N_STARS
+    n_total = n_f + n_b + n_s
+    print(f"总粒子: {n_total}  (流体 {n_f} + 蝴蝶 {n_b} + 星星 {n_s})")
 
-  // 红胸鳍 2片
-  const g3 = new THREE.BoxGeometry(0.7,0.5,0.18);
-  const finR1 = new THREE.Mesh(g3, matRedCord);
-  finR1.position.set(0.2,-1.1,0.6);
-  finR1.userData.basePos = finR1.position.clone();
-  finR1.userData.axis = new THREE.Vector3(1,0,0);
-  finR1.userData.rotateDir = 1;
-  pieceGroup.add(finR1); pieces.push(finR1);
+    prog = ctx.program(vertex_shader=VS, fragment_shader=FS)
+    vbo = ctx.buffer(reserve=n_total * 8 * 4)
+    va = ctx.vertex_array(
+        prog,
+        [(vbo, "3f 3f 1f 1f", "in_pos", "in_col", "in_size", "in_bright")]
+    )
+    frame = np.empty((n_total, 8), dtype='f4')
 
-  const finR2 = new THREE.Mesh(g3, matRedCord);
-  finR2.position.set(0.2,-1.1,-0.6);
-  finR2.userData.basePos = finR2.position.clone();
-  finR2.userData.axis = new THREE.Vector3(1,0,0);
-  finR2.userData.rotateDir = -1;
-  pieceGroup.add(finR2); pieces.push(finR2);
+    while not glfw.window_should_close(win):
+        if glfw.get_key(win, glfw.KEY_ESCAPE) == glfw.PRESS:
+            break
+        t = glfw.get_time()
+        fw, fh = glfw.get_framebuffer_size(win)
+        if fw <= 0 or fh <= 0:
+            glfw.swap_buffers(win)
+            glfw.poll_events()
+            continue
+        ps = fh / float(WIN_H)
 
-  // 波点腹片
-  const gDot = new THREE.SphereGeometry(1,8,4,0,Math.PI);
-  const dotMesh = new THREE.Mesh(gDot, matDot);
-  dotMesh.position.set(0.4,-0.6,0);
-  dotMesh.userData.basePos = dotMesh.position.clone();
-  dotMesh.userData.axis = new THREE.Vector3(0,1,0);
-  dotMesh.userData.rotateDir = 1;
-  pieceGroup.add(dotMesh); pieces.push(dotMesh);
+        fw_r = update_flow(t, flow, ps)
+        bw_r = update_bt(t, btf, ps)
+        sw_r = update_stars(t, stars, ps)
 
-  // 眼睛
-  const gEye = new THREE.SphereGeometry(0.22,6,4);
-  const eyeMesh = new THREE.Mesh(gEye, matEye);
-  eyeMesh.position.set(1.4,0.2,0.4);
-  eyeMesh.userData.basePos = eyeMesh.position.clone();
-  eyeMesh.userData.axis = new THREE.Vector3(0,1,0);
-  eyeMesh.userData.rotateDir = 1;
-  pieceGroup.add(eyeMesh); pieces.push(eyeMesh);
+        i = 0
+        for w, c, b, s in (fw_r, bw_r, sw_r):
+            n = w.shape[0]
+            frame[i:i+n, 0:3] = w
+            frame[i:i+n, 3:6] = c
+            frame[i:i+n, 6] = s
+            frame[i:i+n, 7] = b
+            i += n
+        vbo.write(frame.tobytes())
 
-  // 填充下拉框
-  const sel = document.getElementById('pieceSelect');
-  sel.innerHTML = `<option value="">点选模型或选择裁片</option>`;
-  pieces.forEach((_,idx)=>{
-    const opt = document.createElement('option');
-    opt.value = idx;
-    opt.innerText = `裁片 ${idx+1}`;
-    sel.appendChild(opt);
-  })
-}
-createPieces();
+        ctx.clear(0.004, 0.002, 0.006)
+        ang = t * CAM_W
+        dist_mod = CAM_DIST + 18.0 * math.sin(t * 0.075 + 1.3)
+        eye = np.array([
+            dist_mod * math.cos(ang),
+            dist_mod * math.sin(ang),
+            CAM_H + 27.0 * math.sin(t * 0.11),
+        ])
+        tgt = np.array([0.0, 0.0, 100.0])
+        asp = fw / max(fh, 1)
+        mvp = persp(math.radians(45.0), asp, 0.5, 3000.0) @ look_at(eye, tgt, UP)
+        prog["mvp"].write(mvp.astype('f4').tobytes(order='F'))
+        prog["pscale"].value = 1.0
+        va.render(moderngl.POINTS)
 
-// 拆分动画更新
-let splitVal = 0;
-function updateSplit(v){
-  splitVal = v;
-  document.getElementById('progressVal').innerText = v;
-  const t = v / 100;
-  pieces.forEach(mesh=>{
-    mesh.position.copy(mesh.userData.basePos);
-    mesh.rotation.set(0,0,0);
-    // 向外翻开旋转
-    mesh.rotateOnWorldAxis(mesh.userData.axis, mesh.userData.rotateDir * t * Math.PI * 0.45);
-    // 向外位移
-    mesh.position.multiplyScalar(1 + t*0.35);
-  })
-}
-document.getElementById('splitSlider').addEventListener('input',e=>updateSplit(+e.target.value));
-document.getElementById('btnCombine').onclick = ()=>updateSplit(0);
-document.getElementById('btnExplode').onclick = ()=>updateSplit(100);
+        glfw.swap_buffers(win)
+        glfw.poll_events()
+    glfw.terminate()
 
-// 播放拆合动画
-let playAnim = null;
-document.getElementById('btnPlay').onclick = function(){
-  if(playAnim){ cancelAnimationFrame(playAnim); playAnim=null; return; }
-  let t=0;
-  function run(){
-    t+=0.6;
-    let v = Math.sin(t * 0.03)*50 +50;
-    updateSplit(v);
-    if(t<200) playAnim = requestAnimationFrame(run);
-  }
-  run();
-}
 
-// 自动旋转
-let autoRotate = false;
-document.getElementById('btnRotate').onclick = function(){
-  autoRotate = !autoRotate;
-  this.classList.toggle('active', autoRotate);
-}
-
-// 单片单独拆出
-let selectedIdx = -1;
-document.getElementById('pieceSelect').onchange = e=>{
-  selectedIdx = +e.target.value;
-}
-document.getElementById('btnTakeOut').onclick = ()=>{
-  if(selectedIdx<0) return;
-  const m = pieces[selectedIdx];
-  m.position.x += 2.2;
-}
-document.getElementById('btnPutBack').onclick = ()=>{
-  if(selectedIdx<0) return;
-  const m = pieces[selectedIdx];
-  m.position.copy(m.userData.basePos);
-}
-
-// 窗口适配
-window.addEventListener('resize',()=>{
-  const w = document.getElementById('canvasWrap').clientWidth;
-  const h = document.getElementById('canvasWrap').clientHeight;
-  camera.aspect = w/h;
-  camera.updateProjectionMatrix();
-  renderer.setSize(w,h);
-})
-
-// 渲染循环
-function animate(){
-  requestAnimationFrame(animate);
-  controls.update();
-  if(autoRotate) pieceGroup.rotation.y += 0.006;
-  renderer.render(scene,camera);
-}
-animate();
-</script>
-</body>
-</html>
+if __name__ == "__main__":
+    main()
