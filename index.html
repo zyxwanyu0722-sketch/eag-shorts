@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>橙橙鱼 三维拆解</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;font-family:system-ui, sans-serif;}
+body{background:#fff;color:#333;overflow:hidden;height:100vh;display:flex;flex-direction:column;}
+.header{padding:12px 16px;display:flex;justify-content:space-between;align-items:center;border-bottom:1px solid #eee;}
+.title{font-size:18px;font-weight:bold;}
+.info{font-size:13px;color:#777;}
+.main{flex:1;display:grid;grid-template-columns:1fr 280px;}
+@media(max-width:768px){
+  .main{grid-template-columns:1fr;grid-template-rows:1fr auto;}
+}
+#canvasWrap{position:relative;background:#fcfcfc;}
+canvas{display:block;width:100%;height:100%;}
+.panel{padding:16px;border-left:1px solid #eee;display:flex;flex-direction:column;gap:14px;}
+@media(max-width:768px){
+  .panel{border-left:none;border-top:1px solid #eee;}
+}
+.sliderWrap{display:flex;flex-direction:column;gap:6px;}
+.sliderWrap label{font-size:14px;}
+input[type="range"]{width:100%;}
+.btn-group{display:grid;grid-template-columns:1fr 1fr;gap:8px;}
+button{padding:8px;border:1px solid #ddd;background:#fff;border-radius:4px;cursor:pointer;font-size:14px;}
+button.active{background:#333;color:#fff;border-color:#333;}
+.selectWrap{display:flex;flex-direction:column;gap:6px;}
+select{padding:7px;border:1px solid #ddd;border-radius:4px;}
+.btns-single{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:4px;}
+</style>
+</head>
+<body>
+<div class="header">
+  <div class="title">橙橙鱼 三维拆解</div>
+  <div class="info">19片面布 · 4片响纸</div>
+</div>
+<div class="main">
+  <div id="canvasWrap"></div>
+  <div class="panel">
+    <div class="sliderWrap">
+      <label>拆分进度：<span id="progressVal">0</span>%</label>
+      <input id="splitSlider" type="range" min="0" max="100" value="0">
+    </div>
+    <div class="btn-group">
+      <button id="btnCombine">组合成鱼</button>
+      <button id="btnExplode">空间拆解</button>
+      <button id="btnPlay">播放拆合</button>
+      <button id="btnRotate">自动旋转</button>
+    </div>
+    <div class="selectWrap">
+      <label>单片查看</label>
+      <select id="pieceSelect">
+        <option value="">点选模型或选择裁片</option>
+      </select>
+      <div class="btns-single">
+        <button id="btnTakeOut">拆出这片</button>
+        <button id="btnPutBack">装回这片</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.160.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+// 初始化场景
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0xfcfcfc);
+const camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+camera.position.z = 6;
+const renderer = new THREE.WebGLRenderer({antialias:true});
+renderer.setPixelRatio(window.devicePixelRatio);
+renderer.setSize(document.getElementById('canvasWrap').clientWidth, document.getElementById('canvasWrap').clientHeight);
+document.getElementById('canvasWrap').appendChild(renderer.domElement);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
+
+// 灯光
+const ambLight = new THREE.AmbientLight(0xffffff, 0.6);
+scene.add(ambLight);
+const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
+dirLight.position.set(4,5,4);
+scene.add(dirLight);
+
+// 材质（毛绒、灯芯绒、波点）
+const matFur = new THREE.MeshStandardMaterial({color:0xff7722,roughness:0.85,metalness:0.01});
+const matCorduroy = new THREE.MeshStandardMaterial({color:0xc9882e,roughness:0.9,metalness:0});
+const matRedCord = new THREE.MeshStandardMaterial({color:0xdd3344,roughness:0.9,metalness:0});
+const matDot = new THREE.MeshStandardMaterial({color:0xffffff,roughness:0.75,metalness:0});
+const matEye = new THREE.MeshStandardMaterial({color:0xeeeeee,roughness:0.6});
+const matPupil = new THREE.MeshStandardMaterial({color:0x111111,roughness:0.2});
+
+// 存放所有裁片
+const pieces = [];
+const pieceGroup = new THREE.Group();
+scene.add(pieceGroup);
+
+// 生成鱼主体裁片（翻瓣散开，和你截图拆解样式一致）
+function createPieces(){
+  pieceGroup.clear();
+  pieces.length = 0;
+
+  // 身体主瓣 8片
+  const countBody = 8;
+  for(let i=0;i<countBody;i++){
+    const geo = new THREE.SphereGeometry(1.6,12,6, Math.PI*2/countBody*i, Math.PI*2/countBody*0.85);
+    const m = new THREE.Mesh(geo, matFur);
+    m.userData.basePos = m.position.clone();
+    m.userData.axis = new THREE.Vector3(0,1,0);
+    m.userData.rotateDir = (i%2===0)?1:-1;
+    pieceGroup.add(m);
+    pieces.push(m);
+  }
+  // 背鳍
+  const g1 = new THREE.BoxGeometry(1.2,0.6,0.25);
+  const finTop = new THREE.Mesh(g1, matCorduroy);
+  finTop.position.set(0,1.4,0);
+  finTop.userData.basePos = finTop.position.clone();
+  finTop.userData.axis = new THREE.Vector3(1,0,0);
+  finTop.userData.rotateDir = 1;
+  pieceGroup.add(finTop); pieces.push(finTop);
+
+  // 尾鳍
+  const g2 = new THREE.BoxGeometry(0.8,0.7,0.2);
+  const finTail = new THREE.Mesh(g2, matCorduroy);
+  finTail.position.set(-1.7,0,0);
+  finTail.userData.basePos = finTail.position.clone();
+  finTail.userData.axis = new THREE.Vector3(0,0,1);
+  finTail.userData.rotateDir = -1;
+  pieceGroup.add(finTail); pieces.push(finTail);
+
+  // 红胸鳍 2片
+  const g3 = new THREE.BoxGeometry(0.7,0.5,0.18);
+  const finR1 = new THREE.Mesh(g3, matRedCord);
+  finR1.position.set(0.2,-1.1,0.6);
+  finR1.userData.basePos = finR1.position.clone();
+  finR1.userData.axis = new THREE.Vector3(1,0,0);
+  finR1.userData.rotateDir = 1;
+  pieceGroup.add(finR1); pieces.push(finR1);
+
+  const finR2 = new THREE.Mesh(g3, matRedCord);
+  finR2.position.set(0.2,-1.1,-0.6);
+  finR2.userData.basePos = finR2.position.clone();
+  finR2.userData.axis = new THREE.Vector3(1,0,0);
+  finR2.userData.rotateDir = -1;
+  pieceGroup.add(finR2); pieces.push(finR2);
+
+  // 波点腹片
+  const gDot = new THREE.SphereGeometry(1,8,4,0,Math.PI);
+  const dotMesh = new THREE.Mesh(gDot, matDot);
+  dotMesh.position.set(0.4,-0.6,0);
+  dotMesh.userData.basePos = dotMesh.position.clone();
+  dotMesh.userData.axis = new THREE.Vector3(0,1,0);
+  dotMesh.userData.rotateDir = 1;
+  pieceGroup.add(dotMesh); pieces.push(dotMesh);
+
+  // 眼睛
+  const gEye = new THREE.SphereGeometry(0.22,6,4);
+  const eyeMesh = new THREE.Mesh(gEye, matEye);
+  eyeMesh.position.set(1.4,0.2,0.4);
+  eyeMesh.userData.basePos = eyeMesh.position.clone();
+  eyeMesh.userData.axis = new THREE.Vector3(0,1,0);
+  eyeMesh.userData.rotateDir = 1;
+  pieceGroup.add(eyeMesh); pieces.push(eyeMesh);
+
+  // 填充下拉框
+  const sel = document.getElementById('pieceSelect');
+  sel.innerHTML = `<option value="">点选模型或选择裁片</option>`;
+  pieces.forEach((_,idx)=>{
+    const opt = document.createElement('option');
+    opt.value = idx;
+    opt.innerText = `裁片 ${idx+1}`;
+    sel.appendChild(opt);
+  })
+}
+createPieces();
+
+// 拆分动画更新
+let splitVal = 0;
+function updateSplit(v){
+  splitVal = v;
+  document.getElementById('progressVal').innerText = v;
+  const t = v / 100;
+  pieces.forEach(mesh=>{
+    mesh.position.copy(mesh.userData.basePos);
+    mesh.rotation.set(0,0,0);
+    // 向外翻开旋转
+    mesh.rotateOnWorldAxis(mesh.userData.axis, mesh.userData.rotateDir * t * Math.PI * 0.45);
+    // 向外位移
+    mesh.position.multiplyScalar(1 + t*0.35);
+  })
+}
+document.getElementById('splitSlider').addEventListener('input',e=>updateSplit(+e.target.value));
+document.getElementById('btnCombine').onclick = ()=>updateSplit(0);
+document.getElementById('btnExplode').onclick = ()=>updateSplit(100);
+
+// 播放拆合动画
+let playAnim = null;
+document.getElementById('btnPlay').onclick = function(){
+  if(playAnim){ cancelAnimationFrame(playAnim); playAnim=null; return; }
+  let t=0;
+  function run(){
+    t+=0.6;
+    let v = Math.sin(t * 0.03)*50 +50;
+    updateSplit(v);
+    if(t<200) playAnim = requestAnimationFrame(run);
+  }
+  run();
+}
+
+// 自动旋转
+let autoRotate = false;
+document.getElementById('btnRotate').onclick = function(){
+  autoRotate = !autoRotate;
+  this.classList.toggle('active', autoRotate);
+}
+
+// 单片单独拆出
+let selectedIdx = -1;
+document.getElementById('pieceSelect').onchange = e=>{
+  selectedIdx = +e.target.value;
+}
+document.getElementById('btnTakeOut').onclick = ()=>{
+  if(selectedIdx<0) return;
+  const m = pieces[selectedIdx];
+  m.position.x += 2.2;
+}
+document.getElementById('btnPutBack').onclick = ()=>{
+  if(selectedIdx<0) return;
+  const m = pieces[selectedIdx];
+  m.position.copy(m.userData.basePos);
+}
+
+// 窗口适配
+window.addEventListener('resize',()=>{
+  const w = document.getElementById('canvasWrap').clientWidth;
+  const h = document.getElementById('canvasWrap').clientHeight;
+  camera.aspect = w/h;
+  camera.updateProjectionMatrix();
+  renderer.setSize(w,h);
+})
+
+// 渲染循环
+function animate(){
+  requestAnimationFrame(animate);
+  controls.update();
+  if(autoRotate) pieceGroup.rotation.y += 0.006;
+  renderer.render(scene,camera);
+}
+animate();
+</script>
+</body>
+</html>
